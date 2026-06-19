@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pico Blocks - Kesintisiz Akıcı Sürüm</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        body {
+            margin: 0; padding: 0; background: #1a1a24; color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh;
+            user-select: none; -webkit-user-select: none; overflow: hidden;
+        }
+        #lobby, #waiting-room, #game-container {
+            background: #252538; padding: 30px; border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; border: 2px solid #3d3d5c;
+            width: 380px; box-sizing: border-box;
+        }
+        #waiting-room, #game-container { display: none; }
+        #game-container { width: auto; }
+        input, button, select {
+            width: 100%; padding: 14px; margin: 10px 0;
+            border-radius: 6px; border: none; font-size: 16px; box-sizing: border-box;
+        }
+        input, select { background: #14141f; color: #00ffcc; border: 1px solid #3d3d5c; }
+        button { background: #ff4a5a; color: #fff; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background: #e03e4d; }
+        button:disabled { background: #555 !important; cursor: not-allowed; }
+        canvas { background: #14141f; border: 3px solid #3d3d5c; border-radius: 8px; display: block; margin-top: 15px; }
+        #hud { display: flex; justify-content: space-between; font-size: 18px; font-weight: bold; color: #00ffcc; margin-bottom: 5px; }
+        #error-msg { color: #ff4a5a; font-weight: bold; margin-top: 10px; font-size: 14px; min-height: 20px; }
+        
+        .player-list-item {
+            display: flex; align-items: center; justify-content: space-between;
+            background: #14141f; padding: 10px; margin: 5px 0; border-radius: 6px; border-left: 5px solid #fff;
+        }
+
+        #chat-box {
+            position: fixed; bottom: 20px; right: 20px; width: 280px; height: 320px;
+            background: #252538; border: 2px solid #3d3d5c; border-radius: 10px;
+            display: flex; flex-direction: column; box-shadow: 0 5px 20px rgba(0,0,0,0.5); z-index: 999;
+        }
+        #chat-messages { flex: 1; padding: 10px; overflow-y: auto; font-size: 13px; text-align: left; }
+        #chat-input-container { display: flex; border-top: 1px solid #3d3d5c; padding: 5px; background: #14141f; border-radius: 0 0 10px 10px; }
+        #chat-input { flex: 1; padding: 8px; margin: 0; background: transparent; border: none; color: #fff; font-size: 13px; }
+        #chat-input:focus { outline: none; }
+        #chat-btn { width: auto; padding: 8px 15px; margin: 0; font-size: 13px; background: #00ffcc; color: #000; }
+
+        #mobile-controls { display: flex; justify-content: center; gap: 20px; margin-top: 15px; }
+        .touch-btn {
+            background: #3d3d5c; color: white; width: 60px; height: 50px; 
+            border-radius: 8px; font-size: 20px; font-weight: bold; 
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+        }
+        .touch-btn:active { background: #00ffcc; color: #000; }
+    </style>
+</head>
+<body>
+
+    <div id="lobby">
+        <h2 style="color: #00ffcc; margin-top: 0; letter-spacing: 1px;">PICO BLOCKS 🐾</h2>
+        <input type="text" id="username" placeholder="Oyuncu Adı" value="Kedi">
+        
+        <label style="font-size:12px; color:#00ffcc; display:block; text-align:left; margin-bottom:-5px;">Skin Seç:</label>
+        <select id="user-skin">
+            <option value="#ff4a5a">Kırmızı Klasik</option>
+            <option value="#007bff">Mavi Fırtına</option>
+            <option value="#33ff66">Yeşil Neon</option>
+            <option value="#ff9900">Turuncu Enerji</option>
+            <option value="#cc33ff">Mor Gece</option>
+            <option value="#ffff33">Sarı Limon</option>
+        </select>
+
+        <input type="text" id="room-id" placeholder="Oda / Server Adı">
+        <button id="btn-create">Oda Kur (Host)</button>
+        <button id="btn-join" style="background:#007bff;">Odaya Katıl (Client)</button>
+        <div id="error-msg"></div>
+    </div>
+
+    <div id="waiting-room">
+        <h3 style="color: #00ffcc; margin-top: 0;">⏳ BEKLEME ODASI</h3>
+        <p style="font-size: 13px; color: #aaa;">Oyunun başlaması için en az 3 kişi gerekiyor.</p>
+        <div id="w-room-name" style="font-weight: bold; color: #ffcc00; margin-bottom: 15px;">ODA: -</div>
+        
+        <div id="player-list" style="max-height: 180px; overflow-y: auto; margin-bottom: 15px;"></div>
+
+        <div id="start-status" style="font-size: 14px; font-weight: bold; color: #ff4a5a;">
+            3 Oyuncu Bekleniyor...
+        </div>
+    </div>
+
+    <div id="game-container">
+        <div id="hud">
+            <div>ODA: <span id="stat-room" style="color:#fff;">-</span></div>
+            <div>BÖLÜM: <span id="stat-level" style="color:#ffcc00;">1</span>/30</div>
+            <div>OYUNCULAR: <span id="stat-players">1</span></div>
+        </div>
+        <canvas id="gameCanvas" width="800" height="450"></canvas>
+        
+        <div id="mobile-controls">
+            <div class="touch-btn" id="btn-left">◀</div>
+            <div class="touch-btn" id="btn-up">▲ Zıpla</div>
+            <div class="touch-btn" id="btn-right">▶</div>
+            <div class="touch-btn" id="btn-reset" style="background:#ff4a5a; font-size:12px;">Tuşları<br>Sıfırla (R)</div>
+        </div>
+    </div>
+
+    <div id="chat-box" style="display: none;">
+        <div style="background: #3d3d5c; padding: 8px; font-size: 12px; font-weight: bold; border-radius: 8px 8px 0 0;">💬 CANLI SOHBET</div>
+        <div id="chat-messages"></div>
+        <div id="chat-input-container">
+            <input type="text" id="chat-input" placeholder="Mesaj yazın..." maxlength="50">
+            <button id="chat-btn">Gönder</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const errDiv = document.getElementById('error-msg');
+        
+        let peer = null, connections = [], isHost = false, myId = "", myName = "", myColor = "#ff4a5a";
+        let players = {}, currentLevel = 1, hasKey = false;
+        let mapLoaded = false, gameStarted = false; 
+
+        const gravity = 0.5;
+        let platforms = [];
+        let keyObj = { x: 0, y: 0, size: 15, collected: false };
+        let doorObj = { x: 0, y: 0, w: 40, h: 60 };
+
+        const keys = { w: false, a: false, d: false, ArrowUp: false, ArrowLeft: false, ArrowRight: false, " ": false };
+        
+        window.addEventListener('keydown', e => { 
+            let k = e.key.toLowerCase();
+            if(e.key in keys) keys[e.key] = true;
+            if(k === 'w' || k === 'a' || k === 'd') keys[k] = true;
+            if(k === 'r') resetKeys();
+
+            if(e.key === 'Enter' && isHost && !gameStarted) {
+                if(Object.keys(players).length >= 3) {
+                    gameStarted = true;
+                    broadcastData({ type: 'START_GAME' });
+                    startGameSystem();
+                }
+            }
+        });
+        
+        window.addEventListener('keyup', e => { 
+            let k = e.key.toLowerCase();
+            if(e.key in keys) keys[e.key] = false;
+            if(k === 'w' || k === 'a' || k === 'd') keys[k] = false;
+        });
+
+        window.addEventListener('blur', () => { resetKeys(); });
+        function resetKeys() { for(let k in keys) keys[k] = false; }
+
+        setupTouchButton('btn-left', 'a');
+        setupTouchButton('btn-right', 'd');
+        setupTouchButton('btn-up', ' ');
+        document.getElementById('btn-reset').addEventListener('click', resetKeys);
+
+        function setupTouchButton(btnId, keyBind) {
+            const btn = document.getElementById(btnId);
+            btn.addEventListener('mousedown', (e) => { e.preventDefault(); keys[keyBind] = true; });
+            btn.addEventListener('mouseup', (e) => { e.preventDefault(); keys[keyBind] = false; });
+            btn.addEventListener('mouseleave', (e) => { e.preventDefault(); keys[keyBind] = false; });
+            btn.addEventListener('touchstart', (e) => { e.preventDefault(); keys[keyBind] = true; });
+            btn.addEventListener('touchend', (e) => { e.preventDefault(); keys[keyBind] = false; });
+        }
+
+        document.getElementById('chat-btn').addEventListener('click', sendChatMessage);
+        document.getElementById('chat-input').addEventListener('keydown', e => { if(e.key === 'Enter') sendChatMessage(); });
+
+        function sendChatMessage() {
+            let input = document.getElementById('chat-input');
+            let msg = input.value.trim();
+            if(!msg) return;
+            input.value = "";
+
+            if(isHost) {
+                handleIncomingChat(myName, msg);
+            } else {
+                connections.forEach(conn => {
+                    if(conn.open) conn.send({ type: 'CHAT', name: myName, message: msg });
+                });
+            }
+        }
+
+        function handleIncomingChat(sender, message) {
+            addMessageToBox(sender, message);
+            if(isHost) {
+                broadcastData({ type: 'CHAT', name: sender, message: message });
+            }
+        }
+
+        function addMessageToBox(sender, message) {
+            let box = document.getElementById('chat-messages');
+            let msgEl = document.createElement('div');
+            msgEl.innerHTML = `<strong style="color:#00ffcc">${sender}:</strong> <span style="color:#fff">${message}</span>`;
+            box.appendChild(msgEl);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        document.getElementById('btn-create').addEventListener('click', () => initPico(true));
+        document.getElementById('btn-join').addEventListener('click', () => initPico(false));
+
+        function initPico(hostFlag) {
+            errDiv.innerText = "Sunucuya bağlanılıyor...";
+            document.getElementById('btn-create').disabled = true;
+            document.getElementById('btn-join').disabled = true;
+
+            myName = document.getElementById('username').value.trim() || "Kedi";
+            myColor = document.getElementById('user-skin').value; 
+            let roomName = document.getElementById('room-id').value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+            
+            if(!roomName) {
+                document.getElementById('btn-create').disabled = false;
+                document.getElementById('btn-join').disabled = false;
+                return alert("Lütfen geçerli bir oda adı girin!");
+            }
+
+            isHost = hostFlag;
+            const connectionString = "pico-blocks-v3-" + roomName;
+
+            peer = new Peer(isHost ? connectionString : null, {
+                host: '0.peerjs.com', port: 443, secure: true,
+                config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] }
+            });
+
+            peer.on('error', err => {
+                errDiv.innerText = "Bağlantı Hatası! Lütfen ismi değiştirip tekrar deneyin.";
+                document.getElementById('btn-create').disabled = false;
+                document.getElementById('btn-join').disabled = false;
+            });
+
+            peer.on('open', (id) => {
+                myId = id;
+                errDiv.innerText = "";
+                document.getElementById('lobby').style.display = 'none';
+                document.getElementById('waiting-room').style.display = 'block';
+                document.getElementById('chat-box').style.display = 'flex'; 
+                document.getElementById('w-room-name').innerText = "ODA: " + roomName.toUpperCase();
+                document.getElementById('stat-room').innerText = roomName.toUpperCase();
+
+                players[myId] = { id: myId, x: 100, y: 300, vx: 0, vy: 0, name: myName, color: myColor, isGrounded: false };
+                updateWaitingRoomUI();
+
+                if(isHost) {
+                    peer.on('connection', conn => {
+                        connections.push(conn);
+                        setupConnectionEvents(conn);
+                    });
+                } else {
+                    // DONMA ÇÖZÜMÜ: reliable: false ayarı ile paketi UDP gibi en hızlı yoldan tıkanmadan gönderiyoruz
+                    const conn = peer.connect(connectionString, { reliable: false });
+                    connections.push(conn);
+                    setupConnectionEvents(conn);
+                }
+            });
+        }
+
+        function setupConnectionEvents(conn) {
+            conn.on('open', () => {
+                // Bağlantı canlı tutma sinyali (Heartbeat)
+                conn.peerConnection.addEventListener('connectionstatechange', () => {
+                    if(conn.peerConnection.connectionState === 'failed') conn.close();
+                });
+                
+                if(!isHost) {
+                    conn.send({ type: 'JOIN', name: myName, color: myColor });
+                }
+            });
+
+            conn.on('data', data => {
+                if(data.type === 'JOIN') {
+                    players[conn.peer] = { id: conn.peer, x: 100, y: 300, vx: 0, vy: 0, name: data.name, color: data.color || '#007bff', isGrounded: false };
+                    sendWaitingRoomSync();
+                    updateWaitingRoomUI();
+                }
+                if(data.type === 'ROOM_SYNC') {
+                    players = data.playersData;
+                    updateWaitingRoomUI();
+                }
+                if(data.type === 'CHAT') {
+                    handleIncomingChat(data.name, data.message);
+                }
+                if(data.type === 'START_GAME') {
+                    gameStarted = true;
+                    startGameSystem();
+                }
+                if(data.type === 'KEY_COLLECTED') {
+                    hasKey = true; keyObj.collected = true;
+                }
+                if(data.type === 'MOVE') {
+                    if(players[conn.peer]) {
+                        players[conn.peer].x = data.x; players[conn.peer].y = data.y;
+                        players[conn.peer].vx = data.vx; players[conn.peer].vy = data.vy;
+                    }
+                }
+                if(data.type === 'SYNC') {
+                    currentLevel = data.level; hasKey = data.hasKey; platforms = data.platforms; keyObj = data.keyObj; doorObj = data.doorObj; mapLoaded = true; 
+                    for(let id in data.playersData) { if(id !== myId) players[id] = data.playersData[id]; }
+                    document.getElementById('stat-level').innerText = currentLevel;
+                    document.getElementById('stat-players').innerText = Object.keys(players).length;
+                }
+            });
+
+            conn.on('close', () => { 
+                delete players[conn.peer]; 
+                connections = connections.filter(c => c.peer !== conn.peer); 
+                if(isHost) {
+                    sendWaitingRoomSync();
+                    updateWaitingRoomUI();
+                }
+            });
+        }
+
+        function sendWaitingRoomSync() {
+            broadcastData({ type: 'ROOM_SYNC', playersData: players });
+        }
+
+        function broadcastData(obj) {
+            connections.forEach(c => { if(c.open) c.send(obj); });
+        }
+
+        function updateWaitingRoomUI() {
+            let list = document.getElementById('player-list');
+            list.innerHTML = "";
+            let pCount = Object.keys(players).length;
+
+            for(let id in players) {
+                let p = players[id];
+                list.innerHTML += `<div class="player-list-item" style="border-left-color: ${p.color}">
+                    <span>🐾 ${p.name}</span>
+                    <span style="font-size:11px; color:#aaa;">${id === myId ? '(Sen)' : ''}</span>
+                </div>`;
+            }
+
+            let status = document.getElementById('start-status');
+            if(pCount < 3) {
+                status.style.color = "#ff4a5a";
+                status.innerText = `Gerekli Oyuncu: ${pCount}/3 (Bekleniyor...)`;
+            } else {
+                status.style.color = "#00ffcc";
+                if(isHost) {
+                    status.innerHTML = "3 Oyuncu Tamam! <br><span style='color:#fff; font-size:16px; background:#ff4a5a; padding:4px 8px; border-radius:4px;'>BAŞLATMAK İÇİN ENTER'A BASIN</span>";
+                } else {
+                    status.innerText = "3 Oyuncu Tamam! Kurucunun Başlatması Bekleniyor...";
+                }
+            }
+        }
+
+        function startGameSystem() {
+            document.getElementById('waiting-room').style.display = 'none';
+            document.getElementById('game-container').style.display = 'block';
+            
+            if(isHost) {
+                mapLoaded = true;
+                loadLevel(currentLevel);
+                gameLoop();
+            } else {
+                function clientLoop() {
+                    let hostConn = connections[0];
+                    if(mapLoaded && hostConn && hostConn.open) { 
+                        updatePhysics(players[myId]);
+                        if(!hasKey && Math.hypot(players[myId].x - keyObj.x, players[myId].y - keyObj.y) < 25) {
+                            hostConn.send({ type: 'KEY_COLLECTED' });
+                        }
+                        hostConn.send({ type: 'MOVE', x: players[myId].x, y: players[myId].y, vx: players[myId].vx, vy: players[myId].vy });
+                    }
+                    drawGame();
+                    requestAnimationFrame(clientLoop);
+                }
+                clientLoop();
+            }
+        }
+
+        function sendSyncData() {
+            connections.forEach(c => { if(c.open) c.send({ type: 'SYNC', level: currentLevel, hasKey, platforms, keyObj, doorObj, playersData: players }); });
+        }
+
+        function loadLevel(lvl) {
+            hasKey = false; keyObj.collected = false;
+            let startX = 80;
+            for(let id in players) { players[id].x = startX; players[id].y = 300; players[id].vy = 0; startX += 45; }
+            
+            platforms = [{ x: 0, y: 400, w: 800, h: 50 }];
+            let seed = lvl * 45;
+            doorObj.x = 710; doorObj.y = 340; 
+
+            if (lvl === 1) {
+                platforms.push({ x: 300, y: 280, w: 200, h: 30 });
+                keyObj.x = 400; keyObj.y = 230;
+            } else if (lvl === 2) {
+                platforms.push({ x: 250, y: 310, w: 300, h: 20 });
+                keyObj.x = 400; keyObj.y = 265; 
+            } else if (lvl === 3) {
+                platforms.push({ x: 120, y: 290, w: 200, h: 20 }, { x: 340, y: 190, w: 200, h: 20 }, { x: 560, y: 290, w: 200, h: 20 });
+                keyObj.x = 440; keyObj.y = 120;
+            } else {
+                let p1_x = 150 + (seed % 100);
+                let p1_y = 320 - (lvl * 3);
+                let p2_x = 350 + (seed % 80);
+                let p2_y = 240 - (lvl * 2);
+                let p3_x = 550 - (seed % 60);
+                let p3_y = 200 - (lvl * 1);
+
+                platforms.push({ x: p1_x, y: p1_y, w: 150, h: 20 });
+                platforms.push({ x: p2_x, y: p2_y, w: 150, h: 20 });
+                if(lvl % 2 === 0) platforms.push({ x: p3_x, y: p3_y, w: 150, h: 20 });
+
+                keyObj.x = p2_x + 70;
+                keyObj.y = p2_y - 60 - (lvl % 5 * 10); 
+            }
+        }
+
+        function updatePhysics(p) {
+            if(!p || platforms.length === 0) return;
+            let moveSpeed = 3.5; p.vx = 0;
+            if (keys.a || keys.ArrowLeft) p.vx = -moveSpeed;
+            if (keys.d || keys.ArrowRight) p.vx = moveSpeed;
+
+            p.x += p.vx; p.vy += gravity; p.y += p.vy; p.isGrounded = false;
+
+            platforms.forEach(plat => {
+                if (p.x + 15 > plat.x && p.x - 15 < plat.x + plat.w && p.y + 15 > plat.y && p.y - 15 < plat.y + plat.h) {
+                    if (p.vy > 0 && p.y - p.vy + 15 <= plat.y) { p.y = plat.y - 15; p.vy = 0; p.isGrounded = true; }
+                }
+            });
+
+            for(let id in players) {
+                if(id === p.id) continue;
+                let other = players[id];
+                let distX = p.x - other.x; let distY = p.y - other.y;
+                
+                if (Math.abs(distX) < 22 && Math.abs(distY) < 30) {
+                    if (p.vy > 0 && (p.y - p.vy + 15) <= (other.y - 12)) { p.y = other.y - 30; p.vy = 0; p.isGrounded = true; } 
+                    else if (Math.abs(distX) < 22 && Math.abs(distY) < 28) { if (distX > 0) p.x = other.x + 22; else p.x = other.x - 22; }
+                }
+            }
+
+            if ((keys.w || keys.ArrowUp || keys[" "]) && p.isGrounded) { p.vy = -10; p.isGrounded = false; }
+            if (p.x < 15) p.x = 15; if (p.x > canvas.width - 15) p.x = canvas.width - 15;
+            if (p.y > canvas.height) { p.x = 100; p.y = 300; p.vy = 0; }
+        }
+
+        function gameLoop() {
+            updatePhysics(players[myId]);
+
+            if(!hasKey) {
+                for(let id in players) {
+                    if(Math.hypot(players[id].x - keyObj.x, players[id].y - keyObj.y) < 25) { hasKey = true; keyObj.collected = true; }
+                }
+            }
+
+            if(hasKey) {
+                let everyoneAtDoor = true; let totalPlayers = 0;
+                for(let id in players) {
+                    totalPlayers++; let p = players[id];
+                    let atDoor = (p.x >= doorObj.x - 10 && p.x <= doorObj.x + doorObj.w + 10 && p.y >= doorObj.y - 10 && p.y <= doorObj.y + doorObj.h + 10);
+                    if(!atDoor) everyoneAtDoor = false;
+                }
+                
+                if(everyoneAtDoor && totalPlayers >= 3) {
+                    currentLevel++;
+                    if(currentLevel > 30) { 
+                        alert("TEBRİKLER! Oyunu bitirdiniz!"); 
+                        currentLevel = 1; 
+                    }
+                    loadLevel(currentLevel);
+                }
+            }
+
+            sendSyncData();
+            document.getElementById('stat-level').innerText = currentLevel;
+            document.getElementById('stat-players').innerText = Object.keys(players).length;
+            drawGame();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function drawGame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if(!mapLoaded) return;
+
+            platforms.forEach(plat => { ctx.fillStyle = "#4e4e6a"; ctx.fillRect(plat.x, plat.y, plat.w, plat.h); });
+            if (!hasKey) { ctx.fillStyle = "#ffcc00"; ctx.beginPath(); ctx.arc(keyObj.x, keyObj.y, keyObj.size, 0, Math.PI * 2); ctx.fill(); }
+            ctx.fillStyle = hasKey ? "#00ffcc" : "#ff4a5a"; ctx.fillRect(doorObj.x, doorObj.y, doorObj.w, doorObj.h);
+
+            for(let id in players) {
+                let p = players[id]; ctx.fillStyle = p.color; ctx.fillRect(p.x - 15, p.y - 15, 30, 30);
+                ctx.fillStyle = "#fff"; let eyeOffset = p.vx >= 0 ? 3 : -9; ctx.fillRect(p.x + eyeOffset, p.y - 8, 6, 6);
+                ctx.fillStyle = p.color;
+                ctx.beginPath(); ctx.moveTo(p.x - 15, p.y - 15); ctx.lineTo(p.x - 7, p.y - 23); ctx.lineTo(p.x, p.y - 15); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(p.x + 15, p.y - 15); ctx.lineTo(p.x + 7, p.y - 23); ctx.lineTo(p.x, p.y - 15); ctx.fill();
+                ctx.fillStyle = "#ffffff"; ctx.font = "12px sans-serif"; ctx.textAlign = "center"; ctx.fillText(p.name, p.x, p.y - 28);
+            }
+        }
+    </script>
+</body>
+</html>
